@@ -2,9 +2,13 @@
 
 Prosta aplikacja: wgrywasz zdjęcie → klikasz **USUŃ TŁO** → pobierasz PNG z przezroczystym tłem.
 
-## Jak uruchomić
+### ▶ https://maciejniemiecmarketing.github.io/usuwanie-tla/
 
-Kliknij dwukrotnie **`START.bat`**.
+Otwórz link i korzystaj — nic nie trzeba instalować.
+
+## Uruchomienie lokalne (opcjonalne)
+
+Jeśli chcesz uruchomić aplikację z własnego dysku, kliknij dwukrotnie **`START.bat`**.
 
 Otworzy się przeglądarka pod adresem `http://localhost:8765`. Czarne okno konsoli musi
 pozostać otwarte podczas pracy — zamknij je, gdy skończysz.
