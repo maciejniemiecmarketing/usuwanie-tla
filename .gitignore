@@ -1,0 +1,14 @@
+# Windows
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+
+# Edytory
+.vscode/
+.idea/
+
+# Testowe zdjecia i wyniki
+*-bez-tla.png

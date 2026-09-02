@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usuwanie tła ze zdjęć</title>
+<script type="importmap">
+{
+  "imports": {
+    "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.bundle.min.mjs",
+    "onnxruntime-web/webgpu": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.webgpu.bundle.min.mjs"
+  }
+}
+</script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e7e9ee;
+    --muted: #9aa3b2;
+    --accent: #4f8cff;
+    --accent-hover: #3d7bf0;
+    --ok: #35c48a;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    padding: 28px 20px 48px;
+  }
+  header { max-width: 1100px; margin: 0 auto 24px; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.3px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 46px;
+  }
+  .stage {
+    position: relative;
+    min-height: 340px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .stage img { max-width: 100%; max-height: 60vh; display: block; border-radius: 8px; }
+
+  /* szachownica pokazujaca przezroczystosc */
+  .checker {
+    background-color: #2b2f38;
+    background-image:
+      linear-gradient(45deg, #3a3f4a 25%, transparent 25%),
+      linear-gradient(-45deg, #3a3f4a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #3a3f4a 75%),
+      linear-gradient(-45deg, transparent 75%, #3a3f4a 75%);
+    background-size: 18px 18px;
+    background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+  }
+
+  .drop {
+    border: 2px dashed var(--line);
+    border-radius: 12px;
+    width: 100%;
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--muted);
+    text-align: center;
+    padding: 24px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: rgba(79,140,255,.07); }
+  .drop strong { color: var(--text); font-size: 16px; }
+  .drop small { font-size: 12px; }
+  .icon { font-size: 38px; line-height: 1; opacity: .8; }
+
+  .placeholder { color: var(--muted); font-size: 14px; text-align: center; }
+
+  .btn {
+    appearance: none;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 9px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--panel-2);
+    color: var(--text);
+    transition: background .15s, opacity .15s;
+  }
+  .btn:hover:not(:disabled) { background: #262b36; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    padding: 14px 34px;
+    font-size: 16px;
+    letter-spacing: 0.5px;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn-ok { background: var(--ok); border-color: var(--ok); color: #08281c; }
+  .btn-ok:hover:not(:disabled) { background: #2bb47c; }
+
+  .actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin: 24px 0 8px;
+  }
+  .status { color: var(--muted); font-size: 13px; min-height: 20px; text-align: center; }
+  .status.error { color: #ff7b7b; }
+
+  .bar {
+    width: 100%;
+    max-width: 420px;
+    height: 6px;
+    border-radius: 99px;
+    background: var(--panel-2);
+    overflow: hidden;
+    display: none;
+  }
+  .bar.on { display: block; }
+  .bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+
+  .note {
+    max-width: 1100px;
+    margin: 26px auto 0;
+    color: var(--muted);
+    font-size: 12.5px;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Usuwanie tła ze zdjęć</h1>
+  <p>Wgraj zdjęcie, kliknij „USUŃ TŁO”, pobierz wynik w PNG z przezroczystością.</p>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>Oryginał</span>
+        <button class="btn" id="btnChange" style="display:none">Zmień zdjęcie</button>
+      </div>
+      <div class="stage" id="stageIn">
+        <div class="drop" id="drop">
+          <div class="icon">🖼️</div>
+          <strong>Przeciągnij zdjęcie tutaj</strong>
+          <span>lub kliknij, aby wybrać plik</span>
+          <small>JPG, PNG, WEBP — możesz też wkleić ze schowka (Ctrl+V)</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>Bez tła</span>
+        <button class="btn btn-ok" id="btnDownload" disabled>⬇ Pobierz PNG</button>
+      </div>
+      <div class="stage checker" id="stageOut">
+        <div class="placeholder" id="outPlaceholder">Tutaj pojawi się zdjęcie bez tła</div>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="btnRemove" disabled>USUŃ TŁO</button>
+    <div class="bar" id="bar"><i id="barFill"></i></div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <p class="note">
+    Przetwarzanie odbywa się w całości w Twojej przeglądarce — zdjęcia nigdzie nie są wysyłane.
+    Przy pierwszym użyciu pobierany jest model AI (~40 MB); kolejne razy działa już z pamięci podręcznej.
+  </p>
+</div>
+
+<input type="file" id="file" accept="image/*">
+
+<script type="module">
+import { removeBackground } from 'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs';
+
+const $ = id => document.getElementById(id);
+const fileInput = $('file');
+const drop = $('drop');
+const stageIn = $('stageIn');
+const stageOut = $('stageOut');
+const outPlaceholder = $('outPlaceholder');
+const btnRemove = $('btnRemove');
+const btnDownload = $('btnDownload');
+const btnChange = $('btnChange');
+const statusEl = $('status');
+const bar = $('bar');
+const barFill = $('barFill');
+
+let sourceFile = null;
+let sourceUrl = null;
+let resultUrl = null;
+let busy = false;
+
+function setStatus(text, isError) {
+  statusEl.textContent = text;
+  statusEl.classList.toggle('error', !!isError);
+}
+
+function setProgress(on, pct) {
+  bar.classList.toggle('on', on);
+  barFill.style.width = Math.max(0, Math.min(100, pct || 0)) + '%';
+}
+
+function clearResult() {
+  if (resultUrl) { URL.revokeObjectURL(resultUrl); resultUrl = null; }
+  stageOut.innerHTML = '';
+  stageOut.appendChild(outPlaceholder);
+  outPlaceholder.textContent = 'Tutaj pojawi się zdjęcie bez tła';
+  btnDownload.disabled = true;
+}
+
+function loadFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    setStatus('To nie jest plik graficzny.', true);
+    return;
+  }
+  if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+  sourceFile = file;
+  sourceUrl = URL.createObjectURL(file);
+
+  const img = new Image();
+  img.src = sourceUrl;
+  img.alt = file.name;
+  stageIn.innerHTML = '';
+  stageIn.appendChild(img);
+
+  btnChange.style.display = '';
+  btnRemove.disabled = false;
+  clearResult();
+  setStatus('Gotowe do przetworzenia: ' + file.name);
+}
+
+// --- wybor pliku ---
+drop.addEventListener('click', () => fileInput.click());
+btnChange.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => {
+  loadFile(e.target.files[0]);
+  fileInput.value = '';
+});
+
+// --- drag & drop na calej stronie ---
+['dragenter', 'dragover'].forEach(ev =>
+  document.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); })
+);
+['dragleave', 'drop'].forEach(ev =>
+  document.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); })
+);
+document.addEventListener('drop', e => {
+  if (busy) return;
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+// --- wklejanie ze schowka ---
+document.addEventListener('paste', e => {
+  if (busy) return;
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      loadFile(item.getAsFile());
+      break;
+    }
+  }
+});
+
+// --- usuwanie tla ---
+btnRemove.addEventListener('click', async () => {
+  if (!sourceFile || busy) return;
+  busy = true;
+  btnRemove.disabled = true;
+  btnChange.disabled = true;
+  clearResult();
+  outPlaceholder.textContent = 'Przetwarzanie…';
+  setProgress(true, 3);
+  setStatus('Przygotowywanie modelu…');
+
+  try {
+    const blob = await removeBackground(sourceFile, {
+      output: { format: 'image/png', quality: 1 },
+      progress: (key, current, total) => {
+        const pct = total ? Math.round((current / total) * 100) : 0;
+        setProgress(true, pct);
+        setStatus(String(key).indexOf('fetch') === 0
+          ? 'Pobieranie modelu AI… ' + pct + '%'
+          : 'Przetwarzanie obrazu… ' + pct + '%');
+      }
+    });
+
+    resultUrl = URL.createObjectURL(blob);
+    const img = new Image();
+    img.src = resultUrl;
+    img.alt = 'Zdjęcie bez tła';
+    stageOut.innerHTML = '';
+    stageOut.appendChild(img);
+
+    btnDownload.disabled = false;
+    setProgress(false);
+    setStatus('Gotowe! Możesz pobrać zdjęcie.');
+  } catch (err) {
+    console.error(err);
+    setProgress(false);
+    clearResult();
+    setStatus('Błąd: ' + ((err && err.message) || err), true);
+  } finally {
+    busy = false;
+    btnRemove.disabled = false;
+    btnChange.disabled = false;
+  }
+});
+
+// --- pobieranie ---
+btnDownload.addEventListener('click', () => {
+  if (!resultUrl) return;
+  const base = ((sourceFile && sourceFile.name) || 'zdjecie').replace(/\.[^.]+$/, '');
+  const a = document.createElement('a');
+  a.href = resultUrl;
+  a.download = base + '-bez-tla.png';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+</script>
+</body>
+</html>
